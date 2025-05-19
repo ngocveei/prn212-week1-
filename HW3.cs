@@ -1,10 +1,10 @@
-// Build a task scheduler
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace TaskScheduler
+namespace TaskSchedulerDemo
 {
     // Simple task priority enum
     public enum TaskPriority
@@ -13,8 +13,8 @@ namespace TaskScheduler
         Normal,
         High
     }
-    
-    // Interface for task definition
+
+    // Interface for scheduled tasks
     public interface IScheduledTask
     {
         string Name { get; }
@@ -23,19 +23,18 @@ namespace TaskScheduler
         DateTime LastRun { get; }
         Task ExecuteAsync();
     }
-    
-    // A basic implementation of a scheduled task
+
+    // Basic implementation of a scheduled task
     public class SimpleTask : IScheduledTask
     {
         private readonly Func<Task> _action;
         private DateTime _lastRun = DateTime.MinValue;
-        
+
         public string Name { get; }
         public TaskPriority Priority { get; }
         public TimeSpan Interval { get; }
-        
         public DateTime LastRun => _lastRun;
-        
+
         public SimpleTask(string name, TaskPriority priority, TimeSpan interval, Func<Task> action)
         {
             Name = name;
@@ -43,105 +42,158 @@ namespace TaskScheduler
             Interval = interval;
             _action = action;
         }
-        
+
         public async Task ExecuteAsync()
         {
             await _action();
             _lastRun = DateTime.Now;
         }
     }
-    
-    // The scheduler that students need to implement
+
+    // Implementation of the scheduler
     public class TaskScheduler
     {
-        // TODO: Implement task queue/storage mechanism
-        
+        // Underlying list to store tasks
+        private readonly List<IScheduledTask> _tasks = new List<IScheduledTask>();
+        private readonly object _lock = new object();
+
         public TaskScheduler()
         {
-            // TODO: Initialize your scheduler
+            // Nothing to initialize beyond the list
         }
-        
+
+        // Thêm một nhiệm vụ vào danh sách
         public void AddTask(IScheduledTask task)
         {
-            // TODO: Add task to the scheduler
-            throw new NotImplementedException();
+            lock (_lock)
+            {
+                // Tránh thêm trùng tên
+                if (_tasks.Any(t => t.Name == task.Name))
+                    throw new ArgumentException($"Task with name '{task.Name}' already exists.");
+
+                _tasks.Add(task);
+            }
         }
+
         
         public void RemoveTask(string taskName)
         {
-            // TODO: Remove task from the scheduler
-            throw new NotImplementedException();
+            lock (_lock)
+            {
+                var existing = _tasks.FirstOrDefault(t => t.Name == taskName);
+                if (existing != null)
+                    _tasks.Remove(existing);
+            }
         }
-        
-        public async Task StartAsync(CancellationToken cancellationToken)
-        {
-            // TODO: Implement the scheduling logic
-            // - Run higher priority tasks first
-            // - Only run tasks when their interval has elapsed since LastRun
-            // - Keep running until cancellation is requested
-            throw new NotImplementedException();
-        }
-        
+
+
         public List<IScheduledTask> GetScheduledTasks()
         {
-            // TODO: Return a list of all scheduled tasks
-            throw new NotImplementedException();
+            lock (_lock)
+            {
+                // Trả về bản sao để tránh chỉnh sửa trực tiếp
+                return new List<IScheduledTask>(_tasks);
+            }
+        }
+
+     
+        public async Task StartAsync(CancellationToken cancellationToken)
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                List<IScheduledTask> dueTasks;
+                DateTime now = DateTime.Now;
+
+                lock (_lock)
+                {
+                    // Lọc các nhiệm vụ đã đến hạn
+                    dueTasks = _tasks
+                        .Where(t => now - t.LastRun >= t.Interval)
+                        // Ưu tiên cao trước
+                        .OrderByDescending(t => t.Priority)
+                        .ToList();
+                }
+
+                foreach (var task in dueTasks)
+                {
+                    try
+                    {
+                        await task.ExecuteAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Error executing task '{task.Name}': {ex.Message}");
+                    }
+
+                    // Nếu token đã hủy, thoát ngay
+                    if (cancellationToken.IsCancellationRequested)
+                        break;
+                }
+
+                try
+                {
+                    await Task.Delay(500, cancellationToken);
+                }
+                catch (TaskCanceledException)
+                {
+                   
+                    break;
+                }
+            }
         }
     }
-    
+
     class Program
     {
         static async Task Main(string[] args)
         {
             Console.WriteLine("Task Scheduler Demo");
-            
-            // Create the scheduler
             var scheduler = new TaskScheduler();
-            
-            // Add some tasks
+
+            // Thêm các nhiệm vụ mẫu
             scheduler.AddTask(new SimpleTask(
-                "High Priority Task", 
+                "High Priority Task",
                 TaskPriority.High,
                 TimeSpan.FromSeconds(2),
-                async () => {
+                async () =>
+                {
                     Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Running high priority task");
-                    await Task.Delay(500); // Simulate some work
+                    await Task.Delay(500);
                 }
             ));
-            
+
             scheduler.AddTask(new SimpleTask(
-                "Normal Priority Task", 
+                "Normal Priority Task",
                 TaskPriority.Normal,
                 TimeSpan.FromSeconds(3),
-                async () => {
+                async () =>
+                {
                     Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Running normal priority task");
-                    await Task.Delay(300); // Simulate some work
+                    await Task.Delay(300);
                 }
             ));
-            
+
             scheduler.AddTask(new SimpleTask(
-                "Low Priority Task", 
+                "Low Priority Task",
                 TaskPriority.Low,
                 TimeSpan.FromSeconds(4),
-                async () => {
+                async () =>
+                {
                     Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Running low priority task");
-                    await Task.Delay(200); // Simulate some work
+                    await Task.Delay(200);
                 }
             ));
-            
-            // Create a cancellation token that will cancel after 20 seconds
+
             var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            
-            // Or allow the user to cancel with a key press
             Console.WriteLine("Press any key to stop the scheduler...");
-            
-            // Run the scheduler in the background
+
+         
             var schedulerTask = scheduler.StartAsync(cts.Token);
-            
-            // Wait for user input
+
+           
             Console.ReadKey();
             cts.Cancel();
-            
+
             try
             {
                 await schedulerTask;
@@ -150,7 +202,7 @@ namespace TaskScheduler
             {
                 Console.WriteLine("Scheduler stopped by cancellation.");
             }
-            
+
             Console.WriteLine("Scheduler demo finished!");
         }
     }
