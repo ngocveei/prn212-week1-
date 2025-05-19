@@ -9,6 +9,7 @@ namespace CommandLineCalculator
         {
             Console.WriteLine("Welcome to .NET Core Calculator!");
             Console.WriteLine("Available operations: add, subtract, multiply, divide");
+            Console.WrireLine("Enter operation number1 number2");
             Console.WriteLine("Example usage: add 5 3");
             Console.WriteLine("Type 'exit' to quit");
             
